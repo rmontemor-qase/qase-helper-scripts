@@ -16,7 +16,15 @@ import re
 import requests
 from typing import Dict, Optional, Any, List, Tuple
 
-from qase_api import QaseAPI, resolve_qase_base_url
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from qase_api import (
+    QaseAPI,
+    resolve_qase_base_url,
+    list_workspace_project_codes,
+    confirm_run_all_projects,
+)
 
 
 def remove_attachment_references(text: str) -> str:
@@ -292,68 +300,23 @@ def load_config(config_path: str = "config.json") -> Dict[str, Any]:
     return config
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Remove attachment references from Qase test cases"
-    )
-    parser.add_argument(
-        "--config",
-        default="config.json",
-        help="Path to config file (default: config.json)"
-    )
-    parser.add_argument(
-        "--project",
-        help="Qase project code (overrides config file)"
-    )
-    parser.add_argument(
-        "--token",
-        help="Qase API token (overrides config file)"
-    )
-    parser.add_argument(
-        "--host",
-        help="Qase API host (overrides config 'host'; default api.qase.io or from config)",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Perform a dry run without making changes"
-    )
-    parser.add_argument(
-        "--verbose",
-        "-v",
-        action="store_true",
-        help="Show detailed information about each test case"
-    )
-
-    args = parser.parse_args()
-
-    # Load config
-    config: Optional[Dict[str, Any]] = None
-    try:
-        config = load_config(args.config)
-        api_token = args.token or config.get("api_token")
-        project_code = args.project or config.get("project_code")
-    except (FileNotFoundError, ValueError) as e:
-        parser.error(f"Error loading config: {e}")
-
-    if not api_token:
-        parser.error("API token is required (provide via --token or config file)")
-    if not project_code:
-        parser.error("Project code is required (provide via --project or config file)")
-
-    base_url = resolve_qase_base_url(args.host, config, args.config)
-
-    # Initialize API client
+def _run_for_project(
+    api_token: str,
+    project_code: str,
+    base_url: str,
+    dry_run: bool,
+    verbose: bool,
+) -> Dict[str, Any]:
+    """Run the attachment-reference cleanup for a single project."""
     api = QaseAPI(api_token, project_code, base_url)
 
-    # Get all test cases
-    print("=" * 60)
+    print("\n" + "=" * 60)
     print("Remove Attachment References from Test Cases")
     print("=" * 60)
     print(f"Project: {project_code}")
-    if args.dry_run:
+    if dry_run:
         print("DRY RUN MODE - No changes will be made")
-    if args.verbose:
+    if verbose:
         print("VERBOSE MODE - Showing detailed information")
     print()
 
@@ -361,9 +324,14 @@ def main():
 
     if not test_cases:
         print("No test cases found.")
-        return
+        return {
+            "total": 0, "has_references": 0, "fixed": 0, "errors": 0, "skipped": 0,
+            "fields_fixed": {
+                "description": 0, "preconditions": 0, "postconditions": 0,
+                "steps": 0, "custom_fields": 0,
+            },
+        }
 
-    # Statistics
     stats = {
         "total": len(test_cases),
         "has_references": 0,
@@ -411,76 +379,149 @@ def main():
             if "custom_field" in updates:
                 stats["fields_fixed"]["custom_fields"] += len(updates["custom_field"])
             
-            if args.verbose:
+            if verbose:
                 print(f"\n  Case {case_code} ({case_id}): '{title}'")
                 print(f"    Fields to fix: {list(updates.keys())}")
                 if "custom_field" in updates:
                     print(f"    Custom fields: {len(updates['custom_field'])} field(s)")
 
-            if not args.dry_run:
-                # Try to update the test case with retry logic
+            if not dry_run:
                 success, message = update_test_case_with_retry(api, case_id, updates)
                 if success:
                     stats["fixed"] += 1
                     processed += 1
-                    if args.verbose:
-                        if "patched empty actions" in message:
-                            print(f"  [OK] Fixed case {case_code} ({case_id}) - patched empty actions")
-                        else:
-                            print(f"  [OK] Fixed case {case_code} ({case_id})")
+                    if "patched empty actions" in message:
+                        print(f"  [OK] Fixed case {case_code} ({case_id}) - patched empty actions")
                     else:
-                        if "patched empty actions" in message:
-                            print(f"  [OK] Fixed case {case_code} ({case_id}) - patched empty actions")
-                        else:
-                            print(f"  [OK] Fixed case {case_code} ({case_id})")
+                        print(f"  [OK] Fixed case {case_code} ({case_id})")
                 else:
                     stats["errors"] += 1
                     processed += 1
-                    if args.verbose:
+                    if verbose:
                         print(f"  [ERROR] Failed to fix case {case_code} ({case_id}): {message}")
                     else:
                         print(f"  [ERROR] Failed to fix case {case_code} ({case_id})")
             else:
-                if args.verbose:
-                    print(f"  [DRY RUN] Would fix case {case_code} ({case_id})")
-                else:
-                    print(f"  [DRY RUN] Would fix case {case_code} ({case_id})")
+                print(f"  [DRY RUN] Would fix case {case_code} ({case_id})")
                 stats["fixed"] += 1
                 processed += 1
-            
-            # Always show progress on last line
+
             print(f"\rProgress: [{bar}] {progress_pct:.1f}% ({idx}/{stats['total']}) | Fixed: {stats['fixed']}, Errors: {stats['errors']}, Skipped: {stats['skipped']}", end="", flush=True)
         else:
             processed += 1
             stats["skipped"] += 1
-            if args.verbose:
+            if verbose:
                 print(f"  [SKIP] Case {case_code} ({case_id}): No attachment references found")
-                # Show progress on last line
-                print(f"\rProgress: [{bar}] {progress_pct:.1f}% ({idx}/{stats['total']}) | Fixed: {stats['fixed']}, Errors: {stats['errors']}, Skipped: {stats['skipped']}", end="", flush=True)
-            else:
-                # Show progress on same line for skipped cases
-                print(f"\rProgress: [{bar}] {progress_pct:.1f}% ({idx}/{stats['total']}) | Fixed: {stats['fixed']}, Errors: {stats['errors']}, Skipped: {stats['skipped']}", end="", flush=True)
-    
-    # Final progress line - always show complete
-    print()  # New line after progress bar
+            print(f"\rProgress: [{bar}] {progress_pct:.1f}% ({idx}/{stats['total']}) | Fixed: {stats['fixed']}, Errors: {stats['errors']}, Skipped: {stats['skipped']}", end="", flush=True)
+
+    print()
     final_bar = '=' * progress_bar_length
     final_pct = 100.0
     print(f"Progress: [{final_bar}] {final_pct:.1f}% ({stats['total']}/{stats['total']}) | Fixed: {stats['fixed']}, Errors: {stats['errors']}, Skipped: {stats['skipped']}")
 
-    print("\n" + "=" * 60)
-    print("Summary:")
+    print("\n" + "-" * 60)
+    print(f"Summary for project {project_code}:")
     print(f"  Total test cases: {stats['total']}")
     print(f"  Cases with attachment references: {stats['has_references']}")
     print(f"  Cases fixed: {stats['fixed']}")
     print(f"  Cases skipped: {stats['skipped']}")
     print(f"  Errors: {stats['errors']}")
-    print("\nFields fixed:")
-    print(f"  Description: {stats['fields_fixed']['description']}")
-    print(f"  Preconditions: {stats['fields_fixed']['preconditions']}")
-    print(f"  Postconditions: {stats['fields_fixed']['postconditions']}")
-    print(f"  Steps: {stats['fields_fixed']['steps']}")
-    print(f"  Custom fields: {stats['fields_fixed']['custom_fields']}")
-    print("=" * 60)
+    return stats
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Remove attachment references from Qase test cases"
+    )
+    parser.add_argument(
+        "--config", default="config.json",
+        help="Path to config file (default: config.json)",
+    )
+    parser.add_argument(
+        "--project",
+        help=(
+            "Qase project code (overrides config file). "
+            "Use 'all' to run against every project in the workspace."
+        ),
+    )
+    parser.add_argument("--token", help="Qase API token (overrides config file)")
+    parser.add_argument(
+        "--host",
+        help="Qase API host (overrides config 'host'; default api.qase.io or from config)",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Perform a dry run without making changes",
+    )
+    parser.add_argument(
+        "--verbose", "-v", action="store_true",
+        help="Show detailed information about each test case",
+    )
+
+    args = parser.parse_args()
+
+    config: Optional[Dict[str, Any]] = None
+    api_token: Optional[str] = args.token
+    project_code: Optional[str] = args.project
+    try:
+        config = load_config(args.config)
+        api_token = api_token or config.get("api_token")
+        project_code = project_code or config.get("project_code")
+    except (FileNotFoundError, ValueError) as e:
+        if not api_token or not project_code:
+            parser.error(f"Error loading config: {e}")
+
+    if not api_token:
+        parser.error("API token is required (provide via --token or config file)")
+    if not project_code:
+        parser.error("Project code is required (provide via --project or config file)")
+
+    base_url = resolve_qase_base_url(args.host, config, args.config)
+
+    if str(project_code).strip().lower() == "all":
+        codes = list_workspace_project_codes(api_token, base_url)
+        if not codes:
+            parser.error("No projects returned by the API.")
+        if not confirm_run_all_projects(
+            codes, action="remove attachment references in", dry_run=args.dry_run
+        ):
+            print("Aborted.")
+            return
+
+        totals = {"total": 0, "has_references": 0, "fixed": 0, "errors": 0, "skipped": 0}
+        field_totals = {
+            "description": 0, "preconditions": 0, "postconditions": 0,
+            "steps": 0, "custom_fields": 0,
+        }
+        for code in codes:
+            s = _run_for_project(
+                api_token, code, base_url, args.dry_run, args.verbose
+            )
+            for k in totals:
+                totals[k] += int(s.get(k, 0))
+            for k in field_totals:
+                field_totals[k] += int(s["fields_fixed"].get(k, 0))
+
+        print("\n" + "=" * 60)
+        print(f"Workspace-wide summary ({len(codes)} projects)")
+        print("=" * 60)
+        print(f"  Total test cases:                 {totals['total']}")
+        print(f"  Cases with attachment references: {totals['has_references']}")
+        print(f"  Cases fixed:                      {totals['fixed']}")
+        print(f"  Cases skipped:                    {totals['skipped']}")
+        print(f"  Errors:                           {totals['errors']}")
+        print("\nFields fixed:")
+        for k, v in field_totals.items():
+            print(f"  {k}: {v}")
+        print("=" * 60)
+    else:
+        _run_for_project(
+            api_token,
+            str(project_code).strip(),
+            base_url,
+            args.dry_run,
+            args.verbose,
+        )
 
 
 if __name__ == "__main__":

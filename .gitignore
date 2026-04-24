@@ -12,6 +12,10 @@ ENV/
 # Config files with sensitive data
 config.json
 
+# Log files — may contain real project codes, JIRA keys, etc.
+logs/
+*.log
+
 # IDE
 .vscode/
 .idea/

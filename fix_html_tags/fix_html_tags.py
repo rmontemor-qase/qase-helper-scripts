@@ -13,7 +13,15 @@ import argparse
 import re
 from typing import Dict, Optional, Any, List
 
-from qase_api import QaseAPI, resolve_qase_base_url
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from qase_api import (
+    QaseAPI,
+    resolve_qase_base_url,
+    list_workspace_project_codes,
+    confirm_run_all_projects,
+)
 
 
 def strip_html_tags(text: str) -> str:
@@ -176,52 +184,20 @@ def analyze_test_case(test_case: Dict[str, Any]) -> Dict[str, Any]:
     return updates
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Remove HTML tags from all fields in Qase test cases"
-    )
-    parser.add_argument(
-        "--config",
-        default="config.json",
-        help="Path to config file (default: config.json)"
-    )
-    parser.add_argument(
-        "--host",
-        help="Qase API host (overrides config 'host'; default api.qase.io or from config)",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Perform a dry run without making changes"
-    )
-    parser.add_argument(
-        "--verbose",
-        "-v",
-        action="store_true",
-        help="Show detailed information about each case"
-    )
-
-    args = parser.parse_args()
-
-    # Load config
-    config: Optional[Dict[str, Any]] = None
-    try:
-        config = load_config(args.config)
-        api_token = config.get("api_token")
-        project_code = config.get("project_code")
-    except (FileNotFoundError, ValueError) as e:
-        parser.error(f"Error loading config: {e}")
-
-    if not api_token or not project_code:
-        parser.error("API token and project code are required in config file")
-
-    base_url = resolve_qase_base_url(args.host, config, args.config)
-
-    # Initialize API
+def _run_for_project(
+    api_token: str,
+    project_code: str,
+    base_url: str,
+    dry_run: bool,
+    verbose: bool,
+) -> Dict[str, Any]:
+    """Run the HTML-tag cleanup against a single project; return stats."""
     api = QaseAPI(api_token, project_code, base_url)
 
-    # Fetch all test cases
-    print(f"\nFetching test cases from project '{project_code}'...")
+    print("\n" + "=" * 60)
+    print(f"Qase HTML-tag cleanup — project: {project_code}")
+    print("=" * 60)
+    print(f"Fetching test cases from project '{project_code}'...")
     test_cases = api.get_all_test_cases()
 
     stats = {
@@ -235,24 +211,21 @@ def main():
             "preconditions": 0,
             "postconditions": 0,
             "steps": 0,
-            "custom_fields": 0
-        }
+            "custom_fields": 0,
+        },
     }
 
-    print(f"\nAnalyzing {stats['total']} test cases for HTML tags in all fields...")
+    print(f"Analyzing {stats['total']} test cases for HTML tags in all fields...")
 
     for test_case in test_cases:
         case_id = test_case.get("id")
         case_code = test_case.get("code", "")
         title = test_case.get("title", "Untitled")
-        
-        # Analyze test case for HTML tags
+
         updates = analyze_test_case(test_case)
-        
+
         if updates:
             stats["has_html"] += 1
-            
-            # Count which fields were fixed
             if "description" in updates:
                 stats["fields_fixed"]["description"] += 1
             if "preconditions" in updates:
@@ -263,14 +236,14 @@ def main():
                 stats["fields_fixed"]["steps"] += 1
             if "custom_field" in updates:
                 stats["fields_fixed"]["custom_fields"] += len(updates["custom_field"])
-            
-            if args.verbose:
+
+            if verbose:
                 print(f"\n  Case {case_code} ({case_id}): '{title}'")
                 print(f"    Fields to fix: {list(updates.keys())}")
                 if "custom_field" in updates:
                     print(f"    Custom fields: {len(updates['custom_field'])} field(s)")
 
-            if not args.dry_run:
+            if not dry_run:
                 if api.update_test_case(case_id, updates):
                     stats["fixed"] += 1
                     print(f"  [OK] Fixed case {case_code} ({case_id})")
@@ -281,24 +254,124 @@ def main():
                 print(f"  [DRY RUN] Would fix case {case_code} ({case_id})")
                 stats["fixed"] += 1
         else:
-            if args.verbose:
+            if verbose:
                 print(f"  [SKIP] Case {case_code} ({case_id}): No HTML tags found")
             stats["skipped"] += 1
 
-    print("\n" + "=" * 60)
-    print("Summary:")
-    print(f"  Total test cases: {stats['total']}")
+    print("\n" + "-" * 60)
+    print(f"Summary for project {project_code}:")
+    print(f"  Total test cases:     {stats['total']}")
     print(f"  Cases with HTML tags: {stats['has_html']}")
-    print(f"  Cases fixed: {stats['fixed']}")
-    print(f"  Cases skipped: {stats['skipped']}")
-    print(f"  Errors: {stats['errors']}")
-    print("\nFields fixed:")
-    print(f"  Description: {stats['fields_fixed']['description']}")
-    print(f"  Preconditions: {stats['fields_fixed']['preconditions']}")
-    print(f"  Postconditions: {stats['fields_fixed']['postconditions']}")
-    print(f"  Steps: {stats['fields_fixed']['steps']}")
-    print(f"  Custom fields: {stats['fields_fixed']['custom_fields']}")
-    print("=" * 60)
+    print(f"  Cases fixed:          {stats['fixed']}")
+    print(f"  Cases skipped:        {stats['skipped']}")
+    print(f"  Errors:               {stats['errors']}")
+    print(f"    description={stats['fields_fixed']['description']}, "
+          f"preconditions={stats['fields_fixed']['preconditions']}, "
+          f"postconditions={stats['fields_fixed']['postconditions']}, "
+          f"steps={stats['fields_fixed']['steps']}, "
+          f"custom_fields={stats['fields_fixed']['custom_fields']}")
+    return stats
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Remove HTML tags from all fields in Qase test cases"
+    )
+    parser.add_argument(
+        "--config",
+        default="config.json",
+        help="Path to config file (default: config.json)",
+    )
+    parser.add_argument(
+        "--token",
+        help="Qase API token (overrides config file)",
+    )
+    parser.add_argument(
+        "--project",
+        help=(
+            "Qase project code (overrides config file). "
+            "Use 'all' to run against every project in the workspace."
+        ),
+    )
+    parser.add_argument(
+        "--host",
+        help="Qase API host (overrides config 'host'; default api.qase.io or from config)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Perform a dry run without making changes",
+    )
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Show detailed information about each case",
+    )
+
+    args = parser.parse_args()
+
+    config: Optional[Dict[str, Any]] = None
+    api_token: Optional[str] = args.token
+    project_code: Optional[str] = args.project
+
+    try:
+        config = load_config(args.config)
+        api_token = api_token or config.get("api_token")
+        project_code = project_code or config.get("project_code")
+    except (FileNotFoundError, ValueError) as e:
+        if not api_token or not project_code:
+            parser.error(f"Error loading config: {e}")
+
+    if not api_token or not project_code:
+        parser.error("API token and project code are required (via config or CLI)")
+
+    base_url = resolve_qase_base_url(args.host, config, args.config)
+
+    if str(project_code).strip().lower() == "all":
+        codes = list_workspace_project_codes(api_token, base_url)
+        if not codes:
+            parser.error("No projects returned by the API.")
+        if not confirm_run_all_projects(
+            codes, action="remove HTML tags from", dry_run=args.dry_run
+        ):
+            print("Aborted.")
+            return
+
+        totals = {"total": 0, "has_html": 0, "fixed": 0, "errors": 0, "skipped": 0}
+        field_totals = {
+            "description": 0, "preconditions": 0, "postconditions": 0,
+            "steps": 0, "custom_fields": 0,
+        }
+        for code in codes:
+            s = _run_for_project(
+                api_token, code, base_url, args.dry_run, args.verbose
+            )
+            for k in totals:
+                totals[k] += int(s.get(k, 0))
+            for k in field_totals:
+                field_totals[k] += int(s["fields_fixed"].get(k, 0))
+
+        print("\n" + "=" * 60)
+        print(f"Workspace-wide summary ({len(codes)} projects)")
+        print("=" * 60)
+        print(f"  Total test cases:     {totals['total']}")
+        print(f"  Cases with HTML tags: {totals['has_html']}")
+        print(f"  Cases fixed:          {totals['fixed']}")
+        print(f"  Cases skipped:        {totals['skipped']}")
+        print(f"  Errors:               {totals['errors']}")
+        print("\nFields fixed:")
+        for k, v in field_totals.items():
+            print(f"  {k}: {v}")
+        print("=" * 60)
+    else:
+        _run_for_project(
+            api_token,
+            str(project_code).strip(),
+            base_url,
+            args.dry_run,
+            args.verbose,
+        )
 
 
 if __name__ == "__main__":

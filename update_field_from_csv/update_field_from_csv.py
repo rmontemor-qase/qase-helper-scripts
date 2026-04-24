@@ -16,7 +16,15 @@ import argparse
 import re
 from typing import Dict, Optional, Any, List
 
-from qase_api import QaseAPI, resolve_qase_base_url
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from qase_api import (
+    QaseAPI,
+    resolve_qase_base_url,
+    list_workspace_project_codes,
+    confirm_run_all_projects,
+)
 
 
 class CSVFieldUpdater:
@@ -173,10 +181,10 @@ class CSVFieldUpdater:
                 "updated": 0,
                 "errors": 0,
                 "not_found": 0,
-                "skipped": 0
+                "skipped": 0,
+                "matched_codes": set(),
             }
 
-        # Find field ID
         field_id = self.find_field_id()
         if not field_id:
             print(f"Error: Cannot proceed without finding the '{self.field_name}' custom field.")
@@ -186,7 +194,8 @@ class CSVFieldUpdater:
                 "updated": 0,
                 "errors": 0,
                 "not_found": 0,
-                "skipped": 0
+                "skipped": 0,
+                "matched_codes": set(),
             }
 
         # Fetch all test cases
@@ -230,16 +239,16 @@ class CSVFieldUpdater:
 
         print(f"Matching CSV data to Qase test cases...")
 
-        stats = {
+        stats: Dict[str, Any] = {
             "total_csv_rows": len(csv_data),
             "matched": 0,
             "updated": 0,
             "errors": 0,
             "not_found": 0,
-            "skipped": 0
+            "skipped": 0,
+            "matched_codes": set(),
         }
 
-        # Process each CSV row
         for case_code, csv_field_value in csv_data.items():
             # Try to find test case with CSV code as-is, with "C" prefix, or without "C" prefix
             test_case = test_case_map.get(case_code)
@@ -257,6 +266,7 @@ class CSVFieldUpdater:
                 continue
 
             stats["matched"] += 1
+            stats["matched_codes"].add(case_code)
             case_id = test_case.get("id")
             title = test_case.get("title", "Untitled")
             
@@ -298,16 +308,10 @@ class CSVFieldUpdater:
 
         return stats
 
-    def run(self, dry_run: bool = False, verbose: bool = False):
-        """
-        Main execution method.
-
-        Args:
-            dry_run: If True, don't make actual updates
-            verbose: If True, show detailed information about each case
-        """
+    def run(self, dry_run: bool = False, verbose: bool = False) -> Dict[str, Any]:
+        """Main execution method. Returns per-project stats."""
         print("=" * 60)
-        print("Qase Custom Field CSV Updater")
+        print(f"Qase Custom Field CSV Updater — project: {self.api.project_code}")
         print("=" * 60)
         print(f"CSV file: {self.csv_file_path}")
         print(f"Field name: {self.field_name}")
@@ -320,15 +324,15 @@ class CSVFieldUpdater:
 
         stats = self.process_updates(dry_run=dry_run, verbose=verbose)
 
-        print("\n" + "=" * 60)
-        print("Summary:")
-        print(f"  Total CSV rows: {stats['total_csv_rows']}")
-        print(f"  Matched test cases: {stats['matched']}")
-        print(f"  Updated: {stats['updated']}")
-        print(f"  Skipped (already matches): {stats['skipped']}")
-        print(f"  Not found in Qase: {stats['not_found']}")
-        print(f"  Errors: {stats['errors']}")
-        print("=" * 60)
+        print("\n" + "-" * 60)
+        print(f"Summary for project {self.api.project_code}:")
+        print(f"  Total CSV rows:           {stats['total_csv_rows']}")
+        print(f"  Matched in this project:  {stats['matched']}")
+        print(f"  Updated:                  {stats['updated']}")
+        print(f"  Skipped (already match):  {stats['skipped']}")
+        print(f"  Not matched here:         {stats['not_found']}")
+        print(f"  Errors:                   {stats['errors']}")
+        return stats
 
 
 def load_config(config_path: str = "config.json") -> Dict[str, Any]:
@@ -382,7 +386,12 @@ def main():
     )
     parser.add_argument(
         "--project",
-        help="Qase project code (overrides config file)"
+        help=(
+            "Qase project code (overrides config file). "
+            "Use 'all' to iterate every project in the workspace — each "
+            "CSV row will be applied to whichever project its test case "
+            "code lives in."
+        ),
     )
     parser.add_argument(
         "--host",
@@ -471,17 +480,71 @@ def main():
 
     base_url = resolve_qase_base_url(args.host, config, args.config)
 
-    updater = CSVFieldUpdater(
-        api_token=api_token,
-        project_code=project_code,
-        csv_file_path=args.csv_file,
-        field_name=field_name,
-        field_id=field_id,
-        csv_column_name=csv_column_name,
-        base_url=base_url,
-    )
+    if str(project_code).strip().lower() == "all":
+        if field_id is not None:
+            print(
+                "[WARN] 'csv_field_id' / --field-id is project-specific and "
+                "is ignored when project_code='all'. The field will be "
+                "resolved by name in every project."
+            )
+            field_id = None
 
-    updater.run(dry_run=args.dry_run, verbose=args.verbose)
+        codes = list_workspace_project_codes(api_token, base_url)
+        if not codes:
+            parser.error("No projects returned by the API.")
+        if not confirm_run_all_projects(
+            codes,
+            action=f"update '{field_name}' on test cases in",
+            dry_run=args.dry_run,
+        ):
+            print("Aborted.")
+            return
+
+        totals = {"total_csv_rows": 0, "matched": 0, "updated": 0,
+                  "skipped": 0, "errors": 0}
+        matched_codes_overall: set = set()
+
+        for code in codes:
+            updater = CSVFieldUpdater(
+                api_token=api_token,
+                project_code=code,
+                csv_file_path=args.csv_file,
+                field_name=field_name,
+                field_id=None,
+                csv_column_name=csv_column_name,
+                base_url=base_url,
+            )
+            stats = updater.run(dry_run=args.dry_run, verbose=args.verbose)
+            totals["total_csv_rows"] = int(stats.get("total_csv_rows", 0))
+            for k in ("matched", "updated", "skipped", "errors"):
+                totals[k] += int(stats.get(k, 0))
+            matched_codes_overall.update(stats.get("matched_codes") or set())
+
+        not_found_in_workspace = max(
+            totals["total_csv_rows"] - len(matched_codes_overall), 0
+        )
+
+        print("\n" + "=" * 60)
+        print(f"Workspace-wide summary ({len(codes)} projects)")
+        print("=" * 60)
+        print(f"  Total CSV rows:                   {totals['total_csv_rows']}")
+        print(f"  Unique CSV rows matched:          {len(matched_codes_overall)}")
+        print(f"  CSV rows not found in workspace:  {not_found_in_workspace}")
+        print(f"  Total per-project updates:        {totals['updated']}")
+        print(f"  Skipped:                          {totals['skipped']}")
+        print(f"  Errors:                           {totals['errors']}")
+        print("=" * 60)
+    else:
+        updater = CSVFieldUpdater(
+            api_token=api_token,
+            project_code=str(project_code).strip(),
+            csv_file_path=args.csv_file,
+            field_name=field_name,
+            field_id=field_id,
+            csv_column_name=csv_column_name,
+            base_url=base_url,
+        )
+        updater.run(dry_run=args.dry_run, verbose=args.verbose)
 
 
 if __name__ == "__main__":

@@ -20,6 +20,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Set, Tuple
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from qase_api import QaseAPI, resolve_qase_base_url
 
 JIRA_ISSUE_KEY_RE = re.compile(r"\b([A-Z][A-Z0-9]+-\d+)\b")
@@ -425,6 +427,15 @@ def run_all_projects(
     if not codes:
         log.error("No projects returned from API.")
         return
+
+    from qase_api import confirm_run_all_projects
+    if not confirm_run_all_projects(
+        codes, action="attach JIRA external issues in", dry_run=dry_run
+    ):
+        print("Aborted.")
+        log.info("User aborted workspace-wide run.")
+        return
+
     totals_map = _fetch_case_totals_parallel(
         api_token, base_url, codes, parallel_workers, rate_limiter, log
     )

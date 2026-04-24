@@ -11,7 +11,15 @@ import os
 import argparse
 from typing import Dict, List, Any, Optional, Tuple
 
-from qase_api import QaseAPI, resolve_qase_base_url
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from qase_api import (
+    QaseAPI,
+    resolve_qase_base_url,
+    list_workspace_project_codes,
+    confirm_run_all_projects,
+)
 
 
 class CSVFixer:
@@ -302,9 +310,9 @@ class CSVFixer:
 
         return stats
 
-    def run(self, dry_run: bool = False, verbose: bool = False):
+    def run(self, dry_run: bool = False, verbose: bool = False) -> Dict[str, int]:
         """
-        Main execution method for migration.
+        Main execution method for migration. Returns per-project stats.
 
         Args:
             dry_run: If True, don't make actual updates
@@ -314,7 +322,7 @@ class CSVFixer:
             ValueError: If API token or project code not provided during initialization
         """
         print("=" * 60)
-        print("Qase CSV Reference Fixer")
+        print(f"Qase CSV Reference Fixer — project: {self.api.project_code}")
         print("=" * 60)
         if dry_run:
             print("DRY RUN MODE - No changes will be made")
@@ -333,6 +341,8 @@ class CSVFixer:
         if stats['needs_fixing'] == 0 and stats['total'] > 0:
             print("\n  [INFO] All test cases are already fixed! No broken CSV references found.")
         print("=" * 60)
+
+        return stats
 
 
 def load_config(config_path: str = "config.json") -> Dict[str, str]:
@@ -382,7 +392,10 @@ def main():
     )
     parser.add_argument(
         "--project",
-        help="Qase project code (overrides config file)"
+        help=(
+            "Qase project code (overrides config file). "
+            "Use 'all' to run against every project in the workspace."
+        ),
     )
     parser.add_argument(
         "--host",
@@ -426,13 +439,39 @@ def main():
 
     base_url = resolve_qase_base_url(args.host, config, args.config)
 
-    fixer = CSVFixer(
-        api_token=api_token,
-        project_code=project_code,
-        base_url=base_url,
-    )
+    def run_single(code: str) -> Dict[str, int]:
+        return CSVFixer(
+            api_token=api_token,
+            project_code=code,
+            base_url=base_url,
+        ).run(dry_run=args.dry_run, verbose=args.verbose)
 
-    fixer.run(dry_run=args.dry_run, verbose=args.verbose)
+    if str(project_code).strip().lower() == "all":
+        codes = list_workspace_project_codes(api_token, base_url)
+        if not codes:
+            parser.error("No projects returned by the API.")
+        if not confirm_run_all_projects(
+            codes, action="fix CSV references in", dry_run=args.dry_run
+        ):
+            print("Aborted.")
+            return
+
+        totals = {"total": 0, "needs_fixing": 0, "fixed": 0, "errors": 0}
+        for code in codes:
+            stats = run_single(code)
+            for k in totals:
+                totals[k] += int(stats.get(k, 0))
+
+        print("\n" + "=" * 60)
+        print(f"Workspace-wide summary ({len(codes)} projects)")
+        print("=" * 60)
+        print(f"  Total test cases:    {totals['total']}")
+        print(f"  Cases needing fixes: {totals['needs_fixing']}")
+        print(f"  Cases fixed:         {totals['fixed']}")
+        print(f"  Errors:              {totals['errors']}")
+        print("=" * 60)
+    else:
+        run_single(str(project_code).strip())
 
 
 if __name__ == "__main__":

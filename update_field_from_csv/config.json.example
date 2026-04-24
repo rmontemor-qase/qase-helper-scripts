@@ -2,12 +2,6 @@
   "host": "api.qase.io",
   "api_token": "your-api-token-here",
   "project_code": "YOUR_PROJECT_CODE",
-  "parallel_workers": 8,
-  "calls_per_minute": 1000,
-  "log_file": "logs/link_jira_run.log",
-  "source_field": "preconditions",
-  "destination_field": "Preconditions",
-  "jira_refs_field": "References",
   "csv_field_name": "Postconditions",
   "csv_column_name": "Postconditions",
   "csv_field_id": null

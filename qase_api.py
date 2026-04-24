@@ -6,6 +6,7 @@ Handles all API interactions with the Qase API.
 
 import json
 import os
+import sys
 import requests
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -16,8 +17,8 @@ def qase_base_url_from_host(host: Optional[str] = None) -> str:
     """
     Build the Qase API base URL (…/v1).
 
-    If host is missing, uses api.qase.io. Accepts a hostname (api-versant-media.qase.io)
-    or a full URL (https://api-versant-media.qase.io/).
+    If host is missing, uses api.qase.io. Accepts a hostname (api-yourcompany.qase.io)
+    or a full URL (https://api-yourcompany.qase.io/).
     """
     if host is None or not str(host).strip():
         return f"https://{DEFAULT_QASE_HOST}/v1"
@@ -367,3 +368,69 @@ class QaseAPI:
             if not quiet:
                 print(f"Exception when attaching external issues: {msg}")
             return False, msg
+
+
+# ----------------------------------------------------------------------
+# Workspace-wide helpers (shared by scripts that support project_code=all)
+# ----------------------------------------------------------------------
+
+def list_workspace_project_codes(
+    api_token: str,
+    base_url: Optional[str] = None,
+    quiet: bool = True,
+) -> List[str]:
+    """
+    Return every project code in the workspace associated with `api_token`.
+
+    `project_code` on the probe client is irrelevant because /project is a
+    workspace-level endpoint — we just need a valid `QaseAPI` instance.
+    """
+    probe = QaseAPI(api_token, "_probe", base_url)
+    projects = probe.get_all_projects(quiet=quiet)
+    codes: List[str] = []
+    for p in projects:
+        c = p.get("code")
+        if c:
+            codes.append(str(c))
+    return codes
+
+
+def confirm_run_all_projects(
+    codes: List[str],
+    action: str = "run this script against",
+    dry_run: bool = False,
+) -> bool:
+    """
+    Print the project codes and ask the user to confirm a workspace-wide
+    run. Returns True on a literal 'yes' answer, False otherwise.
+
+    In dry-run mode the list is still printed, but the prompt is skipped
+    (nothing is being written, so there is nothing to confirm).
+    Non-interactive terminals (no TTY) are treated as a rejection.
+    """
+    print(f"\nFound {len(codes)} project(s) in this workspace:")
+    for c in codes:
+        print(f"  - {c}")
+    print()
+
+    if dry_run:
+        print("[DRY RUN] Skipping confirmation — no changes will be made.")
+        return True
+
+    if not sys.stdin.isatty():
+        print(
+            "Non-interactive terminal detected — refusing to run against "
+            "all projects without explicit confirmation. Re-run in an "
+            "interactive shell."
+        )
+        return False
+
+    prompt = (
+        f"You are about to {action} ALL {len(codes)} project(s) listed "
+        f"above. Type 'yes' to continue, anything else to abort: "
+    )
+    try:
+        answer = input(prompt).strip().lower()
+    except EOFError:
+        return False
+    return answer == "yes"

@@ -13,6 +13,8 @@ import requests
 from typing import Dict, List, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from qase_api import resolve_qase_base_url
 from threading import Lock
 

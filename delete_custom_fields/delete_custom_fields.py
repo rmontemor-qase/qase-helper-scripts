@@ -12,6 +12,8 @@ import sys
 import requests
 from typing import Dict, List, Any
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from qase_api import resolve_qase_base_url
 
 
