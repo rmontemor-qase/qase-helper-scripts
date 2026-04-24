@@ -16,7 +16,7 @@ import argparse
 import re
 from typing import Dict, Optional, Any, List
 
-from qase_api import QaseAPI
+from qase_api import QaseAPI, resolve_qase_base_url
 
 
 class CSVFieldUpdater:
@@ -29,7 +29,8 @@ class CSVFieldUpdater:
         csv_file_path: str,
         field_name: str,
         field_id: Optional[int] = None,
-        csv_column_name: Optional[str] = None
+        csv_column_name: Optional[str] = None,
+        base_url: Optional[str] = None,
     ):
         """
         Initialize the updater.
@@ -42,7 +43,7 @@ class CSVFieldUpdater:
             field_id: Optional custom field ID (if not provided, will search by name)
             csv_column_name: Name of the CSV column to read (defaults to field_name)
         """
-        self.api = QaseAPI(api_token, project_code)
+        self.api = QaseAPI(api_token, project_code, base_url)
         self.csv_file_path = csv_file_path
         self.field_name = field_name
         self.field_id = field_id
@@ -384,6 +385,10 @@ def main():
         help="Qase project code (overrides config file)"
     )
     parser.add_argument(
+        "--host",
+        help="Qase API host (overrides config 'host'; default api.qase.io or from config)",
+    )
+    parser.add_argument(
         "--field-name",
         default=None,
         help="Name of the custom field to update (default: from config.json or 'Postconditions')"
@@ -417,6 +422,7 @@ def main():
     field_id = args.field_id
     field_name = args.field_name
     csv_column_name = args.csv_column
+    config: Optional[Dict[str, Any]] = None
 
     try:
         config = load_config(args.config)
@@ -463,13 +469,16 @@ def main():
     if not field_name:
         field_name = "Postconditions"
 
+    base_url = resolve_qase_base_url(args.host, config, args.config)
+
     updater = CSVFieldUpdater(
         api_token=api_token,
         project_code=project_code,
         csv_file_path=args.csv_file,
         field_name=field_name,
         field_id=field_id,
-        csv_column_name=csv_column_name
+        csv_column_name=csv_column_name,
+        base_url=base_url,
     )
 
     updater.run(dry_run=args.dry_run, verbose=args.verbose)

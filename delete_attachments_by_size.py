@@ -12,6 +12,8 @@ import sys
 import requests
 from typing import Dict, List, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from qase_api import resolve_qase_base_url
 from threading import Lock
 
 
@@ -68,7 +70,7 @@ def load_config(config_path: str = "config.json") -> Dict[str, Any]:
     return config
 
 
-def get_all_attachments(api_token: str) -> List[Dict[str, Any]]:
+def get_all_attachments(api_token: str, base_url: str) -> List[Dict[str, Any]]:
     """
     Fetch all attachments from the workspace using pagination.
 
@@ -81,7 +83,6 @@ def get_all_attachments(api_token: str) -> List[Dict[str, Any]]:
     all_attachments = []
     offset = 0
     limit = 100
-    base_url = "https://api.qase.io/v1"
     headers = {
         "Token": api_token,
         "accept": "application/json"
@@ -126,7 +127,7 @@ def get_all_attachments(api_token: str) -> List[Dict[str, Any]]:
     return all_attachments
 
 
-def delete_attachment(api_token: str, attachment_hash: str) -> bool:
+def delete_attachment(api_token: str, attachment_hash: str, base_url: str) -> bool:
     """
     Delete an attachment by hash.
 
@@ -137,7 +138,6 @@ def delete_attachment(api_token: str, attachment_hash: str) -> bool:
     Returns:
         True if deletion was successful, False otherwise
     """
-    base_url = "https://api.qase.io/v1"
     url = f"{base_url}/attachment/{attachment_hash}"
     headers = {
         "Token": api_token,
@@ -160,13 +160,13 @@ def delete_attachment_worker(args: tuple) -> tuple:
     Worker function for deleting a single attachment.
     
     Args:
-        args: Tuple of (api_token, attachment_hash, attachment_info, counter)
+        args: Tuple of (api_token, base_url, attachment_hash, attachment_info, counter)
     
     Returns:
         Tuple of (attachment_hash, success)
     """
-    api_token, attachment_hash, attachment_info, counter = args
-    success = delete_attachment(api_token, attachment_hash)
+    api_token, base_url, attachment_hash, attachment_info, counter = args
+    success = delete_attachment(api_token, attachment_hash, base_url)
     
     if success:
         counter.increment_deleted()
@@ -195,8 +195,10 @@ def main():
         print(f"Error loading config: {e}")
         sys.exit(1)
 
+    base_url = resolve_qase_base_url(None, config, "config.json")
+
     # Get all attachments
-    all_attachments = get_all_attachments(api_token)
+    all_attachments = get_all_attachments(api_token, base_url)
 
     if not all_attachments:
         print("\nNo attachments found.")
@@ -239,7 +241,7 @@ def main():
 
     # Prepare arguments for workers
     worker_args = [
-        (api_token, att.get("hash"), att, counter)
+        (api_token, base_url, att.get("hash"), att, counter)
         for att in matching_attachments
     ]
 
@@ -251,7 +253,7 @@ def main():
     with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
         # Submit all deletion tasks
         future_to_hash = {
-            executor.submit(delete_attachment_worker, args): args[1]
+            executor.submit(delete_attachment_worker, args): args[2]
             for args in worker_args
         }
 

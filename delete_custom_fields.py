@@ -12,6 +12,8 @@ import sys
 import requests
 from typing import Dict, List, Any
 
+from qase_api import resolve_qase_base_url
+
 
 def load_config(config_path: str = "config.json") -> Dict[str, Any]:
     """
@@ -45,7 +47,7 @@ def load_config(config_path: str = "config.json") -> Dict[str, Any]:
     return config
 
 
-def get_all_custom_fields(api_token: str) -> List[Dict[str, Any]]:
+def get_all_custom_fields(api_token: str, base_url: str) -> List[Dict[str, Any]]:
     """
     Fetch all custom fields from the workspace using pagination.
 
@@ -58,7 +60,6 @@ def get_all_custom_fields(api_token: str) -> List[Dict[str, Any]]:
     all_fields = []
     offset = 0
     limit = 100
-    base_url = "https://api.qase.io/v1"
     headers = {
         "Token": api_token,
         "accept": "application/json"
@@ -103,7 +104,7 @@ def get_all_custom_fields(api_token: str) -> List[Dict[str, Any]]:
     return all_fields
 
 
-def delete_custom_field(api_token: str, field_id: int) -> bool:
+def delete_custom_field(api_token: str, field_id: int, base_url: str) -> bool:
     """
     Delete a custom field by ID.
 
@@ -114,7 +115,6 @@ def delete_custom_field(api_token: str, field_id: int) -> bool:
     Returns:
         True if deletion was successful, False otherwise
     """
-    base_url = "https://api.qase.io/v1"
     url = f"{base_url}/custom_field/{field_id}"
     headers = {
         "Token": api_token,
@@ -147,8 +147,10 @@ def main():
         print(f"Error loading config: {e}")
         sys.exit(1)
 
+    base_url = resolve_qase_base_url(None, config, "config.json")
+
     # Get all custom fields
-    custom_fields = get_all_custom_fields(api_token)
+    custom_fields = get_all_custom_fields(api_token, base_url)
 
     if not custom_fields:
         print("\nNo custom fields found. Nothing to delete.")
@@ -179,7 +181,7 @@ def main():
         field_title = field.get("title", "Unknown")
 
         print(f"Deleting custom field ID {field_id} ('{field_title}')...", end=" ")
-        if delete_custom_field(api_token, field_id):
+        if delete_custom_field(api_token, field_id, base_url):
             print("✓ Success")
             deleted_count += 1
         else:

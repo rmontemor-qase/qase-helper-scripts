@@ -19,7 +19,7 @@ import os
 import argparse
 from typing import Dict, Optional, Any
 
-from qase_api import QaseAPI
+from qase_api import QaseAPI, resolve_qase_base_url
 
 
 class QaseFieldMigration:
@@ -31,7 +31,8 @@ class QaseFieldMigration:
         project_code: str,
         source_field_name: str,
         destination_field_name: str,
-        destination_field_id: Optional[int] = None
+        destination_field_id: Optional[int] = None,
+        base_url: Optional[str] = None,
     ):
         """
         Initialize the migration tool.
@@ -43,7 +44,7 @@ class QaseFieldMigration:
             destination_field_name: Name of the destination custom field (e.g., 'Preconditions')
             destination_field_id: Optional custom field ID (if not provided, will search by name)
         """
-        self.api = QaseAPI(api_token, project_code)
+        self.api = QaseAPI(api_token, project_code, base_url)
         self.source_field_name = source_field_name
         self.destination_field_name = destination_field_name
         self.destination_field_id = destination_field_id
@@ -360,6 +361,10 @@ def main():
         help="Qase project code (overrides config file)"
     )
     parser.add_argument(
+        "--host",
+        help="Qase API host (overrides config 'host'; default api.qase.io or from config)",
+    )
+    parser.add_argument(
         "--source-field",
         help="Name of the source system field (e.g., 'preconditions', 'description'). Can also be set in config.json"
     )
@@ -392,6 +397,7 @@ def main():
     source_field = args.source_field
     destination_field = args.destination_field
     destination_field_id = args.destination_field_id
+    config: Optional[Dict[str, Any]] = None
 
     try:
         config = load_config(args.config)
@@ -426,12 +432,15 @@ def main():
     if not destination_field:
         parser.error("Destination field name is required (provide via --destination-field or set 'destination_field' in config.json)")
 
+    base_url = resolve_qase_base_url(args.host, config, args.config)
+
     migration = QaseFieldMigration(
         api_token=api_token,
         project_code=project_code,
         source_field_name=source_field,
         destination_field_name=destination_field,
-        destination_field_id=destination_field_id
+        destination_field_id=destination_field_id,
+        base_url=base_url,
     )
 
     migration.run(dry_run=args.dry_run, verbose=args.verbose)

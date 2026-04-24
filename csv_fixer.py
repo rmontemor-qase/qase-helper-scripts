@@ -11,21 +11,31 @@ import os
 import argparse
 from typing import Dict, List, Any, Optional, Tuple
 
-from qase_api import QaseAPI
+from qase_api import QaseAPI, resolve_qase_base_url
 
 
 class CSVFixer:
     """Handles fixing broken CSV references in test case fields and migration orchestration."""
 
-    def __init__(self, api_token: Optional[str] = None, project_code: Optional[str] = None):
+    def __init__(
+        self,
+        api_token: Optional[str] = None,
+        project_code: Optional[str] = None,
+        base_url: Optional[str] = None,
+    ):
         """
         Initialize the CSV fixer.
 
         Args:
             api_token: Qase API token (optional, required for migration)
             project_code: Project code (optional, required for migration)
+            base_url: Qase API base URL (e.g. https://api.qase.io/v1)
         """
-        self.api = QaseAPI(api_token, project_code) if api_token and project_code else None
+        self.api = (
+            QaseAPI(api_token, project_code, base_url)
+            if api_token and project_code
+            else None
+        )
 
     @staticmethod
     def find_broken_csv_references(text: Optional[str]) -> List[Tuple[str, str]]:
@@ -375,6 +385,10 @@ def main():
         help="Qase project code (overrides config file)"
     )
     parser.add_argument(
+        "--host",
+        help="Qase API host (overrides config 'host'; default api.qase.io or from config)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Perform a dry run without making changes"
@@ -391,6 +405,7 @@ def main():
     # Load config from file if token/project not provided via CLI
     api_token = args.token
     project_code = args.project
+    config: Optional[Dict[str, Any]] = None
 
     if not api_token or not project_code:
         try:
@@ -409,9 +424,12 @@ def main():
     if not project_code:
         parser.error("Project code is required (provide via --project or config file)")
 
+    base_url = resolve_qase_base_url(args.host, config, args.config)
+
     fixer = CSVFixer(
         api_token=api_token,
-        project_code=project_code
+        project_code=project_code,
+        base_url=base_url,
     )
 
     fixer.run(dry_run=args.dry_run, verbose=args.verbose)

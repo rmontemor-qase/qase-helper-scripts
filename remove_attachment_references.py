@@ -16,7 +16,7 @@ import re
 import requests
 from typing import Dict, Optional, Any, List, Tuple
 
-from qase_api import QaseAPI
+from qase_api import QaseAPI, resolve_qase_base_url
 
 
 def remove_attachment_references(text: str) -> str:
@@ -310,6 +310,10 @@ def main():
         help="Qase API token (overrides config file)"
     )
     parser.add_argument(
+        "--host",
+        help="Qase API host (overrides config 'host'; default api.qase.io or from config)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Perform a dry run without making changes"
@@ -324,6 +328,7 @@ def main():
     args = parser.parse_args()
 
     # Load config
+    config: Optional[Dict[str, Any]] = None
     try:
         config = load_config(args.config)
         api_token = args.token or config.get("api_token")
@@ -336,8 +341,10 @@ def main():
     if not project_code:
         parser.error("Project code is required (provide via --project or config file)")
 
+    base_url = resolve_qase_base_url(args.host, config, args.config)
+
     # Initialize API client
-    api = QaseAPI(api_token, project_code)
+    api = QaseAPI(api_token, project_code, base_url)
 
     # Get all test cases
     print("=" * 60)

@@ -13,7 +13,7 @@ import argparse
 import re
 from typing import Dict, Optional, Any, List
 
-from qase_api import QaseAPI
+from qase_api import QaseAPI, resolve_qase_base_url
 
 
 def strip_html_tags(text: str) -> str:
@@ -186,6 +186,10 @@ def main():
         help="Path to config file (default: config.json)"
     )
     parser.add_argument(
+        "--host",
+        help="Qase API host (overrides config 'host'; default api.qase.io or from config)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Perform a dry run without making changes"
@@ -200,6 +204,7 @@ def main():
     args = parser.parse_args()
 
     # Load config
+    config: Optional[Dict[str, Any]] = None
     try:
         config = load_config(args.config)
         api_token = config.get("api_token")
@@ -210,8 +215,10 @@ def main():
     if not api_token or not project_code:
         parser.error("API token and project code are required in config file")
 
+    base_url = resolve_qase_base_url(args.host, config, args.config)
+
     # Initialize API
-    api = QaseAPI(api_token, project_code)
+    api = QaseAPI(api_token, project_code, base_url)
 
     # Fetch all test cases
     print(f"\nFetching test cases from project '{project_code}'...")
