@@ -1,0 +1,78 @@
+csv_fixer/config.json.example
+  666638a97690a13e 1-5
+README.md
+  666638a97690a13e 1,3-6,8,11-13,15,17-18,20,23-27,29-30,33-36,38,40-49,51,53-54,56-61,63-65,67,69-71,73,76-92,95-97
+fix_html_tags/config.json.example
+  666638a97690a13e 1-5
+fix_html_tags/README.md
+  666638a97690a13e 1-99
+field_migration/config.json.example
+  666638a97690a13e 1-8
+delete_attachments_by_size/config.json.example
+  666638a97690a13e 1-4
+delete_attachments_by_size/README.md
+  666638a97690a13e 1-121
+csv_fixer/csv_fixer.py
+  666638a97690a13e 14-474
+delete_attachments_by_size/delete_attachments_by_size.py
+  666638a97690a13e 16-17
+field_migration/README.md
+  666638a97690a13e 1-168
+csv_fixer/README.md
+  666638a97690a13e 1-104
+fix_html_tags/fix_html_tags.py
+  666638a97690a13e 16-374
+link_jira_issues/config.json.example
+  666638a97690a13e 1-10
+update_field_from_csv/update_field_from_csv.py
+  666638a97690a13e 19-547
+remove_attachment_references/remove_attachment_references.py
+  666638a97690a13e 19-524
+delete_custom_fields/README.md
+  666638a97690a13e 1-95
+field_migration/field_migration.py
+  666638a97690a13e 5-617
+link_jira_issues/README.md
+  666638a97690a13e 1-123
+remove_attachment_references/config.json.example
+  666638a97690a13e 1-5
+delete_custom_fields/config.json.example
+  666638a97690a13e 1-4
+.gitignore
+  666638a97690a13e 15-18
+link_jira_issues/link_jira_issues.py
+  666638a97690a13e 23-438
+remove_attachment_references/README.md
+  666638a97690a13e 1-106
+qase_api.py
+  666638a97690a13e 9,20-21,370-436
+delete_custom_fields/delete_custom_fields.py
+  666638a97690a13e 15-16
+update_field_from_csv/README.md
+  666638a97690a13e 1-152
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "a8553ec7388cde499225e63efec1a4f6a826853f",
+  "prompts": {
+    "666638a97690a13e": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "cb566999-b9ac-44db-86fd-dcc67d2d47b3",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "rmontemor-qase",
+      "messages": [],
+      "total_additions": 2219,
+      "total_deletions": 776,
+      "accepted_lines": 2065,
+      "overriden_lines": 0
+    }
+  },
+  "humans": {
+    "h_3d1514d6cddc1e": {
+      "author": "rmontemor-qase"
+    }
+  }
+}
